@@ -108,10 +108,17 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Set up MSVC
         if: runner.os == 'Windows'
-        with:
-          arch: x64
+        shell: pwsh
+        run: |
+          $before = [Environment]::GetEnvironmentVariables()
+          $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw 'Visual Studio C++ tools not found' }
+          & "$vs/Common7/Tools/Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          Get-ChildItem Env: | Where-Object { $before[$_.Name] -cne $_.Value } | ForEach-Object {
+            "$($_.Name)=$($_.Value)" >> $env:GITHUB_ENV
+          }
 
       - uses: actions/download-artifact@v8
         with:
@@ -148,7 +155,8 @@ jobs:
               otool -l "$LIBRARY" | grep -q "minos $MACOS_MIN_VERSION"
               ;;
             windows-x86_64)
-              dumpbin.exe /dependents "$LIBRARY" | tee dependencies.txt
+              # Prevent Git Bash from converting /dependents into a filesystem path.
+              MSYS_NO_PATHCONV=1 dumpbin.exe /dependents "$LIBRARY" | tee dependencies.txt
               ! grep -Eqi 'VCRUNTIME|MSVCP|api-ms-win-crt' dependencies.txt
               ;;
           esac
