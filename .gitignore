@@ -1,0 +1,9 @@
+build/
+data/
+jni/target/
+dist/
+upstream/
+.idea/
+*.iml
+*.log
+_research/

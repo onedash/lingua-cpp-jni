@@ -1,0 +1,17 @@
+.git/
+.github/
+.idea/
+build/
+data/*
+!data/model.bin
+jni/target/
+dist/
+_research/
+src/examples/
+tools/*
+!tools/main.cpp
+!tools/jni-smoke.sh
+README.md
+upstream/
+*.iml
+*.log

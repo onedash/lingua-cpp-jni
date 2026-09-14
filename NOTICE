@@ -1,0 +1,10 @@
+Lingua C++ uses language models, language metadata, Unicode script tables and
+rule/scoring behavior derived from lingua-rs.
+
+Original project: https://github.com/pemistahl/lingua-rs
+Copyright © 2020-present Peter M. Stahl <pemistahl@gmail.com>
+Licensed under the Apache License, Version 2.0.
+
+This implementation replaces the runtime model representation and detection
+engine with C++ code. Its generated metadata and binary model files are derived
+from the original project's data. The original project is not modified.
