@@ -14,12 +14,8 @@ import java.util.Objects;
  * scratch space is created once per request thread and reused without a request-time lock.
  * The model intentionally remains loaded until process exit, so there is no close operation.
  *
- * <p>Confidence values come on one of two scales, see {@link ConfidenceScale}. The default is
- * {@link ConfidenceScale#PROBABILITY} and can be switched process-wide with
- * {@code -Dlingua.cpp.confidence.scale=relative}, so an application whose thresholds were tuned
- * against Lingua's own confidence values can keep calling {@link #computeLanguageConfidenceValues}
- * unchanged. Code that wants one specific scale regardless of configuration should name it, with
- * {@link #computeLanguageConfidenceValues(String, ConfidenceScale)}.
+ * <p>Confidence values use {@link ConfidenceScale#PROBABILITY} unless the caller selects a scale
+ * with {@link #computeLanguageConfidenceValues(String, ConfidenceScale)}.
  */
 public final class LanguageDetector {
     public static final int LANGUAGE_COUNT = Language.UNKNOWN.ordinal();
@@ -42,29 +38,7 @@ public final class LanguageDetector {
         RELATIVE
     }
 
-    /** Scale used by the calls that do not name one. Read once; set it before the first call. */
-    private static final ConfidenceScale DEFAULT_SCALE = defaultScale();
-
     private LanguageDetector() {}
-
-    private static ConfidenceScale defaultScale() {
-        final String configured = System.getProperty("lingua.cpp.confidence.scale", "probability");
-        switch (configured) {
-            case "probability":
-                return ConfidenceScale.PROBABILITY;
-            case "relative":
-                return ConfidenceScale.RELATIVE;
-            default:
-                throw new IllegalArgumentException(
-                        "lingua.cpp.confidence.scale must be \"probability\" or \"relative\", not \""
-                                + configured + "\"");
-        }
-    }
-
-    /** The scale {@link #computeLanguageConfidenceValues(String)} reports on. */
-    public static ConfidenceScale defaultConfidenceScale() {
-        return DEFAULT_SCALE;
-    }
 
     /** Loads the all-language model before the service starts accepting requests. */
     public static LanguageDetector load(Path modelPath) {
@@ -104,14 +78,13 @@ public final class LanguageDetector {
     }
 
     /**
-     * Returns confidence values indexed by supported {@link Language#ordinal()}, on the scale
-     * {@link #defaultConfidenceScale()} reports.
+     * Returns probability confidence values indexed by supported {@link Language#ordinal()}.
      */
     public double[] computeLanguageConfidenceValues(String text) {
-        return computeLanguageConfidenceValues(text, DEFAULT_SCALE);
+        return computeLanguageConfidenceValues(text, ConfidenceScale.PROBABILITY);
     }
 
-    /** Returns confidence values on the requested scale, ignoring the configured default. */
+    /** Returns confidence values on the requested scale. */
     public double[] computeLanguageConfidenceValues(String text, ConfidenceScale scale) {
         double[] output = new double[LANGUAGE_COUNT];
         fillLanguageConfidenceValues(text, output, scale);
@@ -123,7 +96,7 @@ public final class LanguageDetector {
      * Every element is overwritten.
      */
     public void fillLanguageConfidenceValues(String text, double[] output) {
-        fillLanguageConfidenceValues(text, output, DEFAULT_SCALE);
+        fillLanguageConfidenceValues(text, output, ConfidenceScale.PROBABILITY);
     }
 
     /** Allocation-free confidence API on the requested scale. Every element is overwritten. */

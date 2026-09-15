@@ -2,36 +2,40 @@
 
 [![Build](https://github.com/onedash/lingua-cpp-jni/actions/workflows/build.yml/badge.svg)](https://github.com/onedash/lingua-cpp-jni/actions/workflows/build.yml)
 
-A C++20, all-language detector built from the probability models and rules in
-`lingua-rs`. The scoring engine uses one inverted n-gram index shared by all
-service workers. It has no Rust runtime dependency.
+A C++20 language detector and Java 21 adapter based on the probability models
+and rules from `lingua-rs`. It supports all 75 languages with one shared,
+immutable model and has no Rust runtime dependency.
 
-The implementation retains the original high-accuracy scoring behavior. It
-supports 75 languages, single-language detection and confidence values. There
-is no builder, unloading, low-accuracy mode, language subset selection or
-mixed-language segmentation API.
+The API focuses on high-throughput services: language detection and confidence
+values are supported; builders, unloading, low-accuracy mode, language subsets,
+and mixed-language segmentation are not.
 
-## Java artifacts and supported platforms
+## Java artifact
 
-Every release publishes four runtime JARs under
-`io.github.onedash:lingua-cpp-jni`:
+Each release publishes one universal JAR:
 
-| Artifact | Classifier | Runtime |
-| --- | --- | --- |
-| Universal | none | All platforms below |
-| Windows x86-64 | `windows-x86_64` | Windows 10 / Server 2016 or newer; no VC Redistributable |
-| Linux x86-64 | `linux-x86_64` | glibc 2.35 or newer; musl is not supported |
-| macOS ARM64 | `macos-aarch64` | macOS 11 or newer |
+```xml
+<dependency>
+  <groupId>io.github.onedash</groupId>
+  <artifactId>lingua-cpp-jni</artifactId>
+  <version>1.9.0-1</version>
+</dependency>
+```
 
-Each JAR contains the Java API, the 75-language model, and either one native
-library or all three. The model appears only once in the universal JAR, so its
-size is close to a platform JAR rather than three times larger. Production
-containers should normally use the platform classifier.
+It contains the Java API, the model, and native libraries for:
 
-### Maven installation
+| Platform | Requirement |
+| --- | --- |
+| Windows x86-64 | Windows 10 / Server 2016 or newer; no VC Redistributable |
+| Linux x86-64 | glibc 2.35 or newer; musl is not supported |
+| macOS ARM64 | macOS 11 or newer |
 
-GitHub Packages requires a classic personal access token with `read:packages`,
-including for public repositories. Add a matching server to `~/.m2/settings.xml`:
+The model is stored only once, so bundling three small native libraries adds
+little to the JAR size.
+
+Artifacts are published to GitHub Packages, which requires a classic personal
+access token with `read:packages`, even for public repositories. Add this server
+to `~/.m2/settings.xml`:
 
 ```xml
 <server>
@@ -41,135 +45,83 @@ including for public repositories. Add a matching server to `~/.m2/settings.xml`
 </server>
 ```
 
-Then add the repository and dependency:
+Then add the repository:
 
 ```xml
 <repository>
   <id>github-onedash</id>
   <url>https://maven.pkg.github.com/onedash/lingua-cpp-jni</url>
 </repository>
-
-<dependency>
-  <groupId>io.github.onedash</groupId>
-  <artifactId>lingua-cpp-jni</artifactId>
-  <version>1.9.0-1</version>
-  <!-- Omit this line for the universal JAR. -->
-  <classifier>linux-x86_64</classifier>
-</dependency>
 ```
 
-The same four JARs are attached to each GitHub Release. A
-release asset is not a Maven repository; download it and use
-`maven-install-plugin:install-file` when GitHub Packages is unsuitable.
+The same JAR is attached to each GitHub Release. If GitHub Packages is not
+suitable, download that asset and install it with
+`maven-install-plugin:install-file`.
 
-## Service integration
+## Java usage
+
+```java
+var detector = LanguageDetector.loadBundled();
+var language = detector.detectLanguageOf(text);
+
+// Reuse this array per worker to avoid an allocation per request.
+double[] confidence = new double[LanguageDetector.LANGUAGE_COUNT];
+detector.fillLanguageConfidenceValues(text, confidence);
+double english = confidence[Language.ENGLISH.ordinal()];
+```
+
+`LanguageDetector.loadBundled()` extracts and verifies the native library for
+the current platform and the bundled model. `loadConfigured()` also honors the
+explicit paths below. Resources are cached in checksum-addressed directories
+under the system temporary directory, and atomic extraction is safe across
+concurrent JVM startups.
+
+| System property | Effect |
+| --- | --- |
+| `lingua.cpp.native.path` | Load a native library directly, useful for `noexec` temporary mounts |
+| `lingua.cpp.model.path` | Load an external model instead of the bundled model |
+| `lingua.cpp.cacheDir` | Set the extraction root; defaults to `java.io.tmpdir` |
+
+The first load keeps one immutable native model for the process. Calls using the
+same canonical model path share it; a different path is rejected. Every Java
+thread lazily creates one native detector and reuses its scratch buffers without
+a request-time lock. The model intentionally remains loaded until process exit.
+A native library can belong to only one JVM classloader, so multi-deployment
+application servers should place the JAR on a shared parent classloader.
+
+Java strings are converted from UTF-16 while preserving NUL and supplementary
+characters and safely replacing isolated surrogates. Undecidable input returns
+`Language.UNKNOWN`; empty and non-letter inputs have zero confidence values.
+
+## C++ usage
 
 ```cpp
 #include <lingua/detector.hpp>
 
-// Once, before accepting requests:
+// Load once before accepting requests.
 auto model = lingua::Model::load("data/model.bin");
 
-// One instance per worker; all workers receive the SAME model pointer:
+// Create one detector per worker and share the model.
 lingua::Detector detector(model);
 auto language = detector.detect_language_of("languages are awesome");
 auto confidence = detector.compute_language_confidence_values("hello world");
 double english = confidence[static_cast<int>(lingua::Language::English)];
 ```
 
-`Model` is immutable after loading. Different detectors may execute concurrently;
-one detector allows one active call at a time because it reuses its scratch
-buffers. Model loading belongs at startup, not inside each request or detector
-construction. There is no internal worker pool or request-time model lock.
-
-## Java / JNI service adapter
-
-The `jni` directory contains a Java 21 adapter designed for an all-language web
-service. It intentionally has no builder or unload operation: `LanguageDetector.load`
-loads `model.bin` once for the lifetime of the process, and repeated loads of that
-same canonical path share it. Every Java request thread lazily creates one native
-`Detector` and reuses its scratch buffers. After that first request on a thread,
-detection does not take a registry or model lock.
-
-```java
-// Self-contained release JAR: extract and verify its native library and model.
-var detector = LanguageDetector.loadBundled();
-var language = detector.detectLanguageOf(text);
-
-// Reuse this array per application worker to avoid a Java allocation per request.
-double[] confidence = new double[LanguageDetector.LANGUAGE_COUNT];
-detector.fillLanguageConfidenceValues(text, confidence);
-double english = confidence[Language.ENGLISH.ordinal()];
-```
-
-`loadConfigured()` honors explicit native/model path properties and otherwise
-uses the bundled resources. The native adapter converts Java UTF-16 itself,
-preserving NUL and supplementary characters and replacing isolated surrogates
-safely.
-
-On first use, resources are extracted once into checksum-addressed directories:
-
-```text
-<tmp>/lingua-cpp-jni-<user>/<kind>-<sha256-prefix>/...
-```
-
-Every cached file is checked against the SHA-256 sidecar in the JAR before it is
-loaded. Atomic publication makes concurrent JVM startup and interrupted
-extractions safe. Available system properties:
-
-| Property | Effect |
-| --- | --- |
-| `lingua.cpp.native.path` | Load a native library directly; useful for `noexec` temp mounts |
-| `lingua.cpp.model.path` | Load an external model instead of extracting the bundled copy |
-| `lingua.cpp.cacheDir` | Extraction root; defaults to `java.io.tmpdir` |
-| `lingua.cpp.confidence.scale` | `probability` (default) or `relative`; see [Confidence scales](#confidence-scales). An unknown value fails at class initialization |
-
-A native library can belong to only one JVM classloader. Application servers
-with multiple deployments should put the JAR on a shared parent classloader.
-
-Build and exercise it on Windows with:
-
-```powershell
-cmake -S . -B build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build/cmake
-ctest --test-dir build/cmake --output-on-failure
-./tools/jni-smoke.ps1
-```
-
-Linux and macOS use `bash ./tools/jni-smoke.sh` after the same CMake build.
-
-Input is UTF-8; malformed UTF-8 throws `std::invalid_argument`. An undecidable
-input returns `Language::Unknown`. Confidence values are an array indexed by
-`Language`, not a sorted list. Empty and non-letter inputs have zero confidences.
+`Model` is immutable. Different detectors can run concurrently; one detector
+allows one active call at a time because it reuses scratch buffers. Input is
+UTF-8, and malformed UTF-8 throws `std::invalid_argument`.
 
 ## Confidence scales
 
-The same scores can be reported on two scales. They rank the languages
-identically and agree on which languages are candidates at all; they differ only
-in how the distance between them is expressed.
+Confidence values default to `Probability`: scores are exponentiated and
+normalized to sum to 1 over the candidate languages. `Relative` matches the
+original Lingua scale, where the winner is always `1.0` and other candidates
+fall in `(0, 1]`. Both scales preserve the same ranking, but their distances and
+thresholds are not interchangeable.
 
-`ConfidenceScale::Probability` is the default. Scores are exponentiated and
-normalized, so they are probabilities summing to 1 over the candidates and the
-winner's value is the model's confidence in it — `0.177` for a clear but
-unremarkable English sentence, `1.0` for unambiguous Japanese.
-
-`ConfidenceScale::Relative` is the scale `lingua-rs` and
-`com.github.pemistahl:lingua` report: the ratio of the best log score to each
-language's log score. Log scores are negative, so the winner is always exactly
-`1.0` and the others fall in `(0, 1]` by how far behind they are.
-
-Use `Relative` when thresholds were tuned against Lingua's own confidence
-values. A policy of the form "act on the model only when the top two are more
-than `t` apart, otherwise consult other signals" means something entirely
-different against probabilities: a two-candidate probability split of
-`0.29 / 0.08` looks decisive at any small `t`, while the same text on the
-relative scale is `1.00 / 0.91` and correctly defers.
-
-**The conversion runs only this way.** `p_i = exp(s_i)/Z` discards the absolute
-log-score offset that `s_best/s_i` depends on, and recovering `s_i` would require
-`log Z`, which the probability vector does not carry. Dividing probabilities by
-their maximum restores a `1.0` at the top but not the original spacing, so the
-scale has to be chosen before scoring, not afterwards.
+Choose the scale explicitly when relative values are needed; it cannot be
+recovered from an already-normalized probability vector:
 
 ```cpp
 auto relative = detector.compute_language_confidence_values(
@@ -181,52 +133,60 @@ double[] relative = detector.computeLanguageConfidenceValues(
         text, LanguageDetector.ConfidenceScale.RELATIVE);
 ```
 
-Callers that cannot change code can switch the process-wide default for the
-no-scale overloads with `-Dlingua.cpp.confidence.scale=relative`.
-`detect_language_of` and `detectLanguageOf` are unaffected by either setting:
-the ranking is the same on both scales.
-
 ## How detection works
 
-Detection has two stages. First, the input is validated and decoded from UTF-8,
-lowercased with Unicode-aware mappings, and split into script-appropriate words.
-Fast rules then count scripts and distinctive characters. A decisive rule result
-is returned immediately; otherwise these counts reduce the set of candidate
-languages.
+The detector validates and decodes input, applies Unicode-aware lowercasing,
+and splits it into script-appropriate words. Script and distinctive-character
+rules can identify a language immediately or narrow the candidates.
 
-The statistical stage extracts distinct character n-grams from the words. Short
-text uses orders 1 through 5; text with at least 120 token characters uses only
-trigrams. Each n-gram is looked up once in an inverted index whose postings hold
-the languages and their log probabilities. When an exact n-gram is absent for a
-language, the detector removes characters from the end and tries shorter
-prefixes. Scores are accumulated per candidate, adjusted by the available
-unigram count, and then turned into confidence values on the requested scale —
-exponentiated and normalized by default, see [Confidence scales](#confidence-scales).
-If the two highest values tie, `detect_language_of` returns `Language::Unknown`.
+The statistical stage extracts distinct character n-grams and looks each one up
+once in an inverted index. Short text uses orders 1 through 5; text with at least
+120 token characters uses trigrams. Missing n-grams fall back to shorter
+prefixes. Candidate scores are accumulated and converted to the requested
+confidence scale. A tie for the highest score produces `Language::Unknown`.
 
-## Generated metadata
+## Model and generated metadata
 
-`generated/metadata.hpp` is required runtime data, despite its generated name.
-It defines the public `Language` enum, language count and names, plus the Unicode
-ranges, lowercase mappings, script-to-language masks, and distinctive-character
-rules used by `src/detector.cpp`. It is generated separately from `data/model.bin`:
-the header contains classification metadata and the binary file contains n-gram
-probabilities. Removing the header would require replacing both its public API
-definitions and its Unicode/rule tables.
+`generated/metadata.hpp` is checked-in runtime data. It defines the public
+language enum and Unicode, script, and distinctive-character tables.
+`data/model.bin` contains the n-gram probabilities. Regenerate both together
+when changing the pinned `lingua-rs` checkout.
 
-The current compact model occupies **267,582,938 bytes (255.19 MiB)** in memory,
-plus a shared 2.125 MiB Unicode property table and per-detector scratch space.
-Its file is 265,371,148 bytes (253.08 MiB). Scratch capacity tracks the largest
-input processed by that detector. Load the model once and share it; calling
-`Model::load` repeatedly creates separate copies.
+The compact model uses 267,582,938 bytes (255.19 MiB) in memory and its file is
+265,371,148 bytes (253.08 MiB). A shared Unicode table adds 2.125 MiB;
+per-detector scratch capacity grows with the largest input it has processed.
+Load the model once and share it.
 
-## Build and generate models
+The model is a trusted, versioned build artifact, not a format for accepting
+arbitrary models from service clients.
 
-The runtime requires a little-endian C++20 platform with IEEE-754 doubles.
-The model generation/reference tools also need Rust, the adjacent Lingua
-checkout and the dependency versions listed in `tools/prepare.ps1`.
+## Build and test
 
-In PowerShell, from this directory:
+The runtime requires a little-endian C++20 platform with IEEE-754 doubles. To
+build the current checked-in model and run native/JNI tests:
+
+```powershell
+cmake -S . -B build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/cmake
+ctest --test-dir build/cmake --output-on-failure
+./tools/jni-smoke.ps1
+```
+
+Linux and macOS use `bash ./tools/jni-smoke.sh`. The Docker build reproduces the
+published glibc Linux library, checks its dependencies and glibc symbol floor,
+and tests the packaged JAR in a clean JRE:
+
+```bash
+docker build .
+docker build --target native-artifact --output type=local,dest=dist .
+```
+
+The second command writes
+`dist/native/linux-x86_64/liblingua_jni.so` for release assembly.
+
+### Regenerate the model
+
+Model generation additionally needs Rust and the adjacent `lingua-rs` checkout:
 
 ```powershell
 ./tools/prepare.ps1 -RustRoot ../lingua-rs
@@ -239,39 +199,13 @@ cmake --build build/cpp --config Release
 ctest --test-dir build/cpp -C Release --output-on-failure
 ```
 
-The Ninja route also avoids duplicate `Path`/`PATH` environment issues seen with
-MSBuild in some shells. Other installations can use their normal CMake toolchain.
+`data/ngrams.raw` is temporary; runtime needs only `data/model.bin`. Generation
+has substantially higher peak memory than runtime because it sorts about 21.1
+million exported records.
 
-`generated/metadata.hpp` is checked in and regenerated by the exporter. It
-contains language names, Unicode ranges, lowercase mappings and rule metadata.
-`data/ngrams.raw` is a temporary conversion file; runtime only needs
-`data/model.bin`. Model generation has substantially higher peak memory than
-runtime because it sorts all 21.1 million exported records. Generated binary
-models and build outputs are excluded from version control.
+### Package the universal JAR
 
-The model file is a trusted build artifact with a versioned header and checked
-array bounds. It is not a general-purpose format for accepting arbitrary models
-from service clients. Regenerate metadata and model together when changing the
-Rust checkout.
-
-## Docker build
-
-The Docker build reproduces the published glibc Linux x86-64 library, runs the
-C++ and JNI tests, checks dynamic dependencies and the glibc symbol floor, and
-loads the packaged JAR in a clean JRE image. `data/model.bin` must exist first.
-
-```bash
-docker build .
-docker build --target native-artifact --output type=local,dest=dist .
-```
-
-The second command writes
-`dist/native/linux-x86_64/liblingua_jni.so`, which is the layout consumed by the
-release workflow.
-
-## Building release JARs
-
-Build each native library on its own target OS and collect the outputs under:
+Build native libraries on their target operating systems and collect:
 
 ```text
 jni/target/generated-resources/
@@ -282,47 +216,37 @@ jni/target/generated-resources/
     └── macos-aarch64/liblingua_jni.dylib
 ```
 
-Do not run `mvn clean` after collecting them because `target` is the staging
-directory. Then package all four runtime variants:
+Do not run `mvn clean` after staging because `target` holds these inputs. Build
+the single universal JAR with:
 
 ```bash
 mvn -f jni/pom.xml -Pdist -DskipTests package
 ```
 
-The ordinary `mvn -f jni/pom.xml verify` command builds a JAR from whichever
-staged platform resources are present and runs the Java loader tests. A current
-platform CMake build plus `tools/jni-smoke.*` tests the native call path directly.
+Ordinary `mvn -f jni/pom.xml verify` packages whichever local resources are
+staged and runs loader tests. A platform CMake build plus `tools/jni-smoke.*`
+tests the native call path directly.
 
-## CI and releasing
+## CI and releases
 
-`.github/workflows/build.yml` deliberately keeps model generation separate from
-native compilation. On a cache miss it checks out the reviewed Lingua 1.9.0
-commit `74eed3045bec53ba4feda2ac1780283f76fa302e`, regenerates metadata and the
-compact model, requires the metadata to match the committed header, and uploads
-one verified model artifact. Windows, Linux/Docker and macOS builds consume that
-same artifact. The final job assembles and inspects exactly four runtime JARs.
+CI generates and verifies one model, builds the three native libraries on their
+target platforms, and assembles one inspected universal JAR. Pull requests and
+ordinary pushes build without publishing; manual runs expose the JAR as a
+short-lived Actions artifact.
 
-Ordinary pushes and pull requests build and test without publishing. A manual
-workflow run also exposes the four JARs as a short-lived Actions artifact. To
-publish GitHub Packages and a GitHub Release:
+Tags publish to GitHub Packages and a GitHub Release:
 
 ```bash
 git tag v1.9.0-1
 git push origin v1.9.0-1
 ```
 
-The built-in `GITHUB_TOKEN` supplies release and package permissions; no custom
-repository secret is required. Versions use `<lingua-version>-<adapter-revision>`.
-GitHub Packages does not allow overwriting an existing version, so release a new
-adapter revision instead of rerunning an already-published tag.
-
-The current Windows classifier JAR is about 172 MiB. The model dominates this
-size; native libraries are small, so the other platform and universal variants
-should be similar. CI enforces that all four expected runtime JARs exist and
-validates their contents and size.
+Versions use `<lingua-version>-<adapter-revision>`. GitHub Packages does not
+allow overwriting a version, so use a new adapter revision instead of rerunning
+an already-published tag. The built-in `GITHUB_TOKEN` supplies release and
+package permissions.
 
 ## License
 
-Apache-2.0. Models, generated language/rule metadata and the compatible rule
-and scoring behavior derive from Peter M. Stahl's Lingua project. See
-[LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. Models, metadata, rules, and scoring behavior derive from Peter M.
+Stahl's Lingua project. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

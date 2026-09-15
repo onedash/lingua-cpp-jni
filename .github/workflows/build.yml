@@ -232,29 +232,25 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: mvn -B -ntp -f jni/pom.xml versions:set -DnewVersion="${GITHUB_REF_NAME#v}" -DgenerateBackupPoms=false
 
-      - name: Package universal and platform JARs
+      - name: Package universal JAR
         run: mvn -B -ntp -f jni/pom.xml -Pdist -DskipTests package
 
-      - name: Collect exactly four runtime JARs
+      - name: Verify universal JAR
         run: |
           set -euo pipefail
           mkdir dist
-          find jni/target -maxdepth 1 -type f -name 'lingua-cpp-jni-*.jar' \
-            -exec cp {} dist/ \;
-          [ "$(find dist -maxdepth 1 -name '*.jar' | wc -l)" -eq 4 ]
-          for jar in dist/*.jar; do
-            [ "$(wc -c < "$jar")" -lt 200000000 ] \
-              || { echo "::error::$jar exceeds the 200 MB release limit"; exit 1; }
-            unexpected="$(unzip -Z1 "$jar" | grep -Ev \
-              '(/$|^META-INF/(MANIFEST\.MF|LICENSE|NOTICE)$|^io/github/onedash/linguacpp/.*\.class$|^model/model\.bin(\.sha256)?$|^native/(windows-x86_64/lingua_jni\.dll|linux-x86_64/liblingua_jni\.so|macos-aarch64/liblingua_jni\.dylib)(\.sha256)?$)' || true)"
-            [ -z "$unexpected" ] \
-              || { echo "::error::$jar contains unexpected files: $unexpected"; exit 1; }
-          done
-          ls -lh dist
-          for jar in dist/*.jar; do
-            echo "== $(basename "$jar")"
-            unzip -l "$jar" | grep -E 'native/.*(dll|so|dylib)$|model/model.bin$'
-          done
+          jar="$(find jni/target -maxdepth 1 -type f -name 'lingua-cpp-jni-*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar')"
+          [ "$(printf '%s\n' "$jar" | grep -c .)" -eq 1 ]
+          cp "$jar" dist/
+          [ "$(wc -c < "$jar")" -lt 200000000 ] \
+            || { echo "::error::$jar exceeds the 200 MB release limit"; exit 1; }
+          unexpected="$(unzip -Z1 "$jar" | grep -Ev \
+            '(/$|^META-INF/(MANIFEST\.MF|LICENSE|NOTICE)$|^io/github/onedash/linguacpp/.*\.class$|^model/model\.bin(\.sha256)?$|^native/(windows-x86_64/lingua_jni\.dll|linux-x86_64/liblingua_jni\.so|macos-aarch64/liblingua_jni\.dylib)(\.sha256)?$)' || true)"
+          [ -z "$unexpected" ] \
+            || { echo "::error::$jar contains unexpected files: $unexpected"; exit 1; }
+          [ "$(unzip -Z1 "$jar" | grep -Ec '^native/.*(dll|so|dylib)$')" -eq 3 ]
+          ls -lh "$jar"
+          unzip -l "$jar" | grep -E 'native/.*(dll|so|dylib)$|model/model.bin$'
 
       - name: Publish to GitHub Packages
         if: startsWith(github.ref, 'refs/tags/v')
@@ -265,7 +261,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch'
         with:
-          name: jars
+          name: jar
           path: dist/*.jar
           retention-days: 1
 

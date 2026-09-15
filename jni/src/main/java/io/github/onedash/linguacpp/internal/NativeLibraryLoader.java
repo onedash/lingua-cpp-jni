@@ -134,7 +134,7 @@ final class NativeLibraryLoader {
         InputStream input = NativeLibraryLoader.class.getResourceAsStream(resource);
         if (input == null) {
             throw new IllegalStateException("This JAR does not bundle " + resource
-                    + "; use the matching platform JAR or an explicit path property");
+                    + "; use the universal release JAR or an explicit path property");
         }
         return input;
     }

@@ -188,48 +188,6 @@
                             </execution>
                         </executions>
                     </plugin>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-jar-plugin</artifactId>
-                        <executions>
-                            <execution>
-                                <id>windows-x86-64</id>
-                                <phase>package</phase>
-                                <goals><goal>jar</goal></goals>
-                                <configuration>
-                                    <classifier>windows-x86_64</classifier>
-                                    <excludes>
-                                        <exclude>native/linux-x86_64/**</exclude>
-                                        <exclude>native/macos-aarch64/**</exclude>
-                                    </excludes>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <id>linux-x86-64</id>
-                                <phase>package</phase>
-                                <goals><goal>jar</goal></goals>
-                                <configuration>
-                                    <classifier>linux-x86_64</classifier>
-                                    <excludes>
-                                        <exclude>native/windows-x86_64/**</exclude>
-                                        <exclude>native/macos-aarch64/**</exclude>
-                                    </excludes>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <id>macos-aarch64</id>
-                                <phase>package</phase>
-                                <goals><goal>jar</goal></goals>
-                                <configuration>
-                                    <classifier>macos-aarch64</classifier>
-                                    <excludes>
-                                        <exclude>native/windows-x86_64/**</exclude>
-                                        <exclude>native/linux-x86_64/**</exclude>
-                                    </excludes>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
                 </plugins>
             </build>
         </profile>

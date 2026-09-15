@@ -30,6 +30,8 @@ public final class LanguageDetectorSmoke {
         // The relative scale pins the winner at 1.0 and keeps the same ranking and candidates.
         double[] probabilities = detector.computeLanguageConfidenceValues(
                 "Bonjour tout le monde", LanguageDetector.ConfidenceScale.PROBABILITY);
+        check(Arrays.equals(probabilities,
+                detector.computeLanguageConfidenceValues("Bonjour tout le monde")));
         double[] relative = detector.computeLanguageConfidenceValues(
                 "Bonjour tout le monde", LanguageDetector.ConfidenceScale.RELATIVE);
         check(relative[Language.FRENCH.ordinal()] == 1.0);
