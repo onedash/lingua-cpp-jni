@@ -27,6 +27,22 @@ public final class LanguageDetectorSmoke {
         detector.fillLanguageConfidenceValues("😀 123 !!!", values);
         check(Arrays.stream(values).allMatch(value -> value == 0.0));
 
+        // The relative scale pins the winner at 1.0 and keeps the same ranking and candidates.
+        double[] probabilities = detector.computeLanguageConfidenceValues(
+                "Bonjour tout le monde", LanguageDetector.ConfidenceScale.PROBABILITY);
+        double[] relative = detector.computeLanguageConfidenceValues(
+                "Bonjour tout le monde", LanguageDetector.ConfidenceScale.RELATIVE);
+        check(relative[Language.FRENCH.ordinal()] == 1.0);
+        check(Math.abs(Arrays.stream(probabilities).sum() - 1.0) < 1e-9);
+        for (int i = 0; i < relative.length; i++) {
+            check((probabilities[i] > 0.0) == (relative[i] > 0.0));
+            check(relative[i] <= 1.0);
+        }
+        Arrays.fill(relative, Double.NaN);
+        detector.fillLanguageConfidenceValues(
+                "😀 123 !!!", relative, LanguageDetector.ConfidenceScale.RELATIVE);
+        check(Arrays.stream(relative).allMatch(value -> value == 0.0));
+
         List<String> texts = List.of(
                 "The quick brown fox jumps over the lazy dog",
                 "Bonjour tout le monde, comment allez-vous?",

@@ -165,10 +165,9 @@ Java_io_github_onedash_linguacpp_internal_NativeDetector_detect(JNIEnv *env, jcl
     });
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_io_github_onedash_linguacpp_internal_NativeDetector_fillConfidenceValues(JNIEnv *env, jclass,
-                                                                              jstring text,
-                                                                              jdoubleArray output) {
+namespace {
+void fill_confidence_values(JNIEnv *env, jstring text, jdoubleArray output,
+                            lingua::ConfidenceScale scale) {
     guarded(env, false, [&] {
         if (!output) {
             throw_java(env, "java/lang/NullPointerException", "output");
@@ -179,10 +178,24 @@ Java_io_github_onedash_linguacpp_internal_NativeDetector_fillConfidenceValues(JN
 
         auto &state = worker();
         const auto values =
-            state.detector.compute_language_confidence_values(read_text(env, text, state));
+            state.detector.compute_language_confidence_values(read_text(env, text, state), scale);
         env->SetDoubleArrayRegion(output, 0, lingua::language_count, values.data());
         if (env->ExceptionCheck())
             throw PendingJavaException{};
         return true;
     });
+}
+} // namespace
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_github_onedash_linguacpp_internal_NativeDetector_fillConfidenceValues(JNIEnv *env, jclass,
+                                                                              jstring text,
+                                                                              jdoubleArray output) {
+    fill_confidence_values(env, text, output, lingua::ConfidenceScale::Probability);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_github_onedash_linguacpp_internal_NativeDetector_fillRelativeConfidenceValues(
+    JNIEnv *env, jclass, jstring text, jdoubleArray output) {
+    fill_confidence_values(env, text, output, lingua::ConfidenceScale::Relative);
 }

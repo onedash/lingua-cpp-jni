@@ -122,6 +122,7 @@ extractions safe. Available system properties:
 | `lingua.cpp.native.path` | Load a native library directly; useful for `noexec` temp mounts |
 | `lingua.cpp.model.path` | Load an external model instead of extracting the bundled copy |
 | `lingua.cpp.cacheDir` | Extraction root; defaults to `java.io.tmpdir` |
+| `lingua.cpp.confidence.scale` | `probability` (default) or `relative`; see [Confidence scales](#confidence-scales). An unknown value fails at class initialization |
 
 A native library can belong to only one JVM classloader. Application servers
 with multiple deployments should put the JAR on a shared parent classloader.
@@ -141,6 +142,50 @@ Input is UTF-8; malformed UTF-8 throws `std::invalid_argument`. An undecidable
 input returns `Language::Unknown`. Confidence values are an array indexed by
 `Language`, not a sorted list. Empty and non-letter inputs have zero confidences.
 
+## Confidence scales
+
+The same scores can be reported on two scales. They rank the languages
+identically and agree on which languages are candidates at all; they differ only
+in how the distance between them is expressed.
+
+`ConfidenceScale::Probability` is the default. Scores are exponentiated and
+normalized, so they are probabilities summing to 1 over the candidates and the
+winner's value is the model's confidence in it — `0.177` for a clear but
+unremarkable English sentence, `1.0` for unambiguous Japanese.
+
+`ConfidenceScale::Relative` is the scale `lingua-rs` and
+`com.github.pemistahl:lingua` report: the ratio of the best log score to each
+language's log score. Log scores are negative, so the winner is always exactly
+`1.0` and the others fall in `(0, 1]` by how far behind they are.
+
+Use `Relative` when thresholds were tuned against Lingua's own confidence
+values. A policy of the form "act on the model only when the top two are more
+than `t` apart, otherwise consult other signals" means something entirely
+different against probabilities: a two-candidate probability split of
+`0.29 / 0.08` looks decisive at any small `t`, while the same text on the
+relative scale is `1.00 / 0.91` and correctly defers.
+
+**The conversion runs only this way.** `p_i = exp(s_i)/Z` discards the absolute
+log-score offset that `s_best/s_i` depends on, and recovering `s_i` would require
+`log Z`, which the probability vector does not carry. Dividing probabilities by
+their maximum restores a `1.0` at the top but not the original spacing, so the
+scale has to be chosen before scoring, not afterwards.
+
+```cpp
+auto relative = detector.compute_language_confidence_values(
+    text, lingua::ConfidenceScale::Relative);
+```
+
+```java
+double[] relative = detector.computeLanguageConfidenceValues(
+        text, LanguageDetector.ConfidenceScale.RELATIVE);
+```
+
+Callers that cannot change code can switch the process-wide default for the
+no-scale overloads with `-Dlingua.cpp.confidence.scale=relative`.
+`detect_language_of` and `detectLanguageOf` are unaffected by either setting:
+the ranking is the same on both scales.
+
 ## How detection works
 
 Detection has two stages. First, the input is validated and decoded from UTF-8,
@@ -155,8 +200,9 @@ trigrams. Each n-gram is looked up once in an inverted index whose postings hold
 the languages and their log probabilities. When an exact n-gram is absent for a
 language, the detector removes characters from the end and tries shorter
 prefixes. Scores are accumulated per candidate, adjusted by the available
-unigram count, exponentiated, and normalized into confidence values. If the two
-highest values tie, `detect_language_of` returns `Language::Unknown`.
+unigram count, and then turned into confidence values on the requested scale —
+exponentiated and normalized by default, see [Confidence scales](#confidence-scales).
+If the two highest values tie, `detect_language_of` returns `Language::Unknown`.
 
 ## Generated metadata
 

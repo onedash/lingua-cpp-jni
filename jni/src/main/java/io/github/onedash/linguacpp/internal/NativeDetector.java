@@ -14,6 +14,7 @@ public final class NativeDetector {
     public static native long modelMemoryBytes();
     public static native int detect(String text);
     public static native void fillConfidenceValues(String text, double[] output);
+    public static native void fillRelativeConfidenceValues(String text, double[] output);
 
     public static Path configuredModelPath() {
         return NativeLibraryLoader.modelPath(true);

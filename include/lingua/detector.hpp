@@ -58,13 +58,29 @@ private:
     const detail::Entry* find(detail::Key key) const;
 };
 
+// Scale of the values compute_language_confidence_values reports. Both scales rank the
+// languages identically and agree on which ones are candidates at all; they differ only in
+// how the distance between them is expressed.
+enum class ConfidenceScale {
+    // Exponentiated and normalized, so the values are probabilities summing to 1 over the
+    // candidates and the winner's value is the model's confidence in it.
+    Probability,
+    // Lingua's original relative scale: best_log_score / language_log_score. Log scores are
+    // negative, so the winner is always exactly 1.0 and the rest fall in (0, 1]. Callers
+    // whose thresholds were tuned against Lingua's own confidence values need this scale.
+    // It cannot be recovered from the probability scale afterwards, because normalizing
+    // discards the absolute log-score offset the ratio depends on.
+    Relative,
+};
+
 class Detector final {
 public:
     explicit Detector(std::shared_ptr<const Model> model);
     // One active call per Detector; separate detectors may run concurrently.
     // Input must be valid UTF-8. Invalid input throws std::invalid_argument.
     Language detect_language_of(std::string_view text);
-    std::array<double, language_count> compute_language_confidence_values(std::string_view text);
+    std::array<double, language_count> compute_language_confidence_values(
+        std::string_view text, ConfidenceScale scale = ConfidenceScale::Probability);
 private:
     std::shared_ptr<const Model> model_;
     std::vector<uint32_t> decoded_;
