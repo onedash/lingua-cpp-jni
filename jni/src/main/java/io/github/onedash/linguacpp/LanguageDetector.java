@@ -13,10 +13,30 @@ import java.util.Objects;
  * Calls with the same path are idempotent; a different path is rejected. Native detector
  * scratch space is created once per request thread and reused without a request-time lock.
  * The model intentionally remains loaded until process exit, so there is no close operation.
+ *
+ * <p>Confidence values use {@link ConfidenceScale#PROBABILITY} unless the caller selects a scale
+ * with {@link #computeLanguageConfidenceValues(String, ConfidenceScale)}.
  */
 public final class LanguageDetector {
     public static final int LANGUAGE_COUNT = Language.UNKNOWN.ordinal();
     private static final Language[] LANGUAGES = Language.values();
+
+    /** How far apart the reported confidence values place the candidate languages. */
+    public enum ConfidenceScale {
+        /**
+         * Probabilities over the candidate languages, summing to 1. The winner's value is the
+         * model's confidence in it, so a clear but unremarkable sentence can score below 0.2.
+         */
+        PROBABILITY,
+        /**
+         * Lingua's original relative scale: the ratio of the best log score to each language's
+         * log score, so the winner is always exactly 1.0 and every other candidate falls in
+         * (0, 1] by how far behind it is. This is what {@code com.github.pemistahl:lingua}
+         * returns, and it cannot be derived from {@link #PROBABILITY} values after the fact:
+         * normalizing discards the absolute log-score offset the ratio depends on.
+         */
+        RELATIVE
+    }
 
     private LanguageDetector() {}
 
@@ -57,10 +77,17 @@ public final class LanguageDetector {
         return index < 0 ? Language.UNKNOWN : LANGUAGES[index];
     }
 
-    /** Returns confidence values indexed by supported {@link Language#ordinal()}. */
+    /**
+     * Returns probability confidence values indexed by supported {@link Language#ordinal()}.
+     */
     public double[] computeLanguageConfidenceValues(String text) {
+        return computeLanguageConfidenceValues(text, ConfidenceScale.PROBABILITY);
+    }
+
+    /** Returns confidence values on the requested scale. */
+    public double[] computeLanguageConfidenceValues(String text, ConfidenceScale scale) {
         double[] output = new double[LANGUAGE_COUNT];
-        fillLanguageConfidenceValues(text, output);
+        fillLanguageConfidenceValues(text, output, scale);
         return output;
     }
 
@@ -69,12 +96,22 @@ public final class LanguageDetector {
      * Every element is overwritten.
      */
     public void fillLanguageConfidenceValues(String text, double[] output) {
+        fillLanguageConfidenceValues(text, output, ConfidenceScale.PROBABILITY);
+    }
+
+    /** Allocation-free confidence API on the requested scale. Every element is overwritten. */
+    public void fillLanguageConfidenceValues(String text, double[] output, ConfidenceScale scale) {
         Objects.requireNonNull(text, "text");
         Objects.requireNonNull(output, "output");
+        Objects.requireNonNull(scale, "scale");
         if (output.length != LANGUAGE_COUNT) {
             throw new IllegalArgumentException("output length must be " + LANGUAGE_COUNT);
         }
-        NativeDetector.fillConfidenceValues(text, output);
+        if (scale == ConfidenceScale.RELATIVE) {
+            NativeDetector.fillRelativeConfidenceValues(text, output);
+        } else {
+            NativeDetector.fillConfidenceValues(text, output);
+        }
     }
 
     public long modelMemoryBytes() {

@@ -194,7 +194,7 @@ void Detector::split_text_into_words(std::string_view text) {
 }
 
 std::array<double, language_count>
-Detector::compute_language_confidence_values(std::string_view text) {
+Detector::compute_language_confidence_values(std::string_view text, ConfidenceScale scale) {
     std::array<double, language_count> values{};
     split_text_into_words(text);
     if (words_.empty())
@@ -340,10 +340,30 @@ Detector::compute_language_confidence_values(std::string_view text) {
         });
     }
 
-    double denominator = 0;
     each(candidates, [&](int language) {
         if (unigrams[language])
             sums[language] /= unigrams[language];
+    });
+
+    if (scale == ConfidenceScale::Relative) {
+        // Every scored language has a negative log score, so the best one is the greatest and
+        // the ratio below lands in (0, 1] with the winner at exactly 1. A language no n-gram
+        // matched keeps a sum of zero and stays out, exactly as it does on the other scale.
+        int best = -1;
+        each(candidates, [&](int language) {
+            if (sums[language] != 0 && (best < 0 || sums[language] > sums[best]))
+                best = language;
+        });
+        if (best >= 0)
+            each(candidates, [&](int language) {
+                if (sums[language] != 0)
+                    values[language] = sums[best] / sums[language];
+            });
+        return values;
+    }
+
+    double denominator = 0;
+    each(candidates, [&](int language) {
         if (sums[language] != 0) {
             values[language] = std::exp(sums[language]);
             denominator += values[language];

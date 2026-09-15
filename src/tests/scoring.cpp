@@ -58,6 +58,17 @@ int main() {
         throw std::runtime_error("Wrong scoring semantics");
     if (result != detector.compute_language_confidence_values("abc abc"))
         throw std::runtime_error("N-grams must be distinct");
+    // The relative scale reports the same ranking as a log-score ratio: the winner is 1 and
+    // the runner-up is how far behind it is, independent of the normalizing constant.
+    const auto relative =
+        detector.compute_language_confidence_values("abc", ConfidenceScale::Relative);
+    if (std::abs(relative[int(Language::German)] - 1.0) > 1e-12 ||
+        std::abs(relative[int(Language::English)] - (-6.7 / 3) / (-8.0 / 3)) > 1e-12)
+        throw std::runtime_error("Wrong relative scoring semantics");
+    // Only the reported distance changes; the candidate set and the winner must not.
+    for (int language = 0; language < language_count; ++language)
+        if ((result[language] > 0) != (relative[language] > 0))
+            throw std::runtime_error("Scales must agree on the candidate set");
     if (detector.detect_language_of("qzx") != Language::Unknown)
         throw std::runtime_error("Missing n-grams must stay unknown");
     // Corrupt lengths must be rejected before allocation or posting access.
