@@ -10,6 +10,21 @@ The API focuses on high-throughput services: language detection and confidence
 values are supported; builders, unloading, low-accuracy mode, language subsets,
 and mixed-language segmentation are not.
 
+## Benchmark
+
+**For a high-load service, `cpp` wins every metric by a wide margin.**
+
+| | jvm 1.2.2 | cpp 1.9.0-2 | rs 1.8.0-2 |
+|---|---:|---:|---:|
+| `detectLanguageOf`, 1 thread, calls/s | 3,701 | **39,388** | 1,661 |
+| `detectLanguageOf`, 8 threads, calls/s | 5,631 | **285,422** | 9,878 |
+| p50 / p99 latency, 8 threads, ms | 0.80 / 14.4 | **0.014 / 0.19** | 0.39 / 4.8 |
+| Model RAM | 1,453 MiB heap | 255 MiB native (reported) | ~300 MiB, mostly file-backed mmap |
+| Process RSS while serving | 3,156 MiB | **364 MiB** | **344 MiB**  |
+| Startup, fresh container / warm | 2.1 s / 2.1 s | 1.8 s / 0.41 s | 1.35 s / **0.24 s** |
+| Raw accuracy on labeled corpus | 89.3% | **90.4%** | **90.4%** |
+
+
 ## Java artifact
 
 Each release publishes one universal JAR:
@@ -18,7 +33,7 @@ Each release publishes one universal JAR:
 <dependency>
   <groupId>io.github.onedash</groupId>
   <artifactId>lingua-cpp-jni</artifactId>
-  <version>1.9.0-1</version>
+  <version>1.9.0-2</version>
 </dependency>
 ```
 
@@ -237,8 +252,8 @@ short-lived Actions artifact.
 Tags publish to GitHub Packages and a GitHub Release:
 
 ```bash
-git tag v1.9.0-1
-git push origin v1.9.0-1
+git tag v1.9.0-x
+git push origin v1.9.0-x
 ```
 
 Versions use `<lingua-version>-<adapter-revision>`. GitHub Packages does not
